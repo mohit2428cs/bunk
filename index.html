@@ -140,6 +140,33 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .sync-label{font-size:11px;color:var(--text3);display:flex;align-items:center;gap:5px;margin-top:3px}
 .footer{text-align:center;padding:28px 24px 40px;color:var(--text3);font-size:13px}
 .footer span{color:var(--accent)}
+/* ── DAYWISE STYLES ─────────────────────────────────── */
+.daywise-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.daywise-card{padding:20px;position:relative;overflow:hidden;cursor:pointer;transition:transform .2s}
+.daywise-card:hover{transform:translateY(-2px)}
+.calendar-wrap{padding:0;animation:fadeUp .4s ease}
+.cal-month{margin-bottom:24px}
+.cal-month-title{font-family:'Syne',sans-serif;font-size:14px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cal-day-header{text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:3px 0;text-transform:uppercase}
+.cal-day{width:100%;aspect-ratio:1;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;position:relative;cursor:default;transition:transform .15s}
+.cal-day:hover{transform:scale(1.15);z-index:1}
+.cal-day.present{background:rgba(52,211,153,.18);color:#34d399;border:1px solid rgba(52,211,153,.3)}
+.cal-day.absent{background:rgba(248,113,113,.18);color:#f87171;border:1px solid rgba(248,113,113,.3)}
+.cal-day.holiday{background:rgba(251,191,36,.12);color:#fbbf24;border:1px solid rgba(251,191,36,.25)}
+.cal-day.empty{background:transparent;border:1px solid transparent}
+.cal-day.today{box-shadow:0 0 0 2px var(--accent)}
+.daywise-stats{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.daywise-stat{flex:1;min-width:80px;padding:10px;background:var(--surface);border-radius:8px;text-align:center}
+.daywise-stat-val{font-family:'Syne',sans-serif;font-size:20px;font-weight:800}
+.daywise-stat-label{font-size:10px;color:var(--text2);margin-top:2px;text-transform:uppercase;letter-spacing:.05em}
+.ext-banner{padding:16px 20px;margin-bottom:20px;border-radius:var(--radius);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;
+  background:linear-gradient(135deg,rgba(124,106,247,.1),rgba(167,139,250,.05));border:1px solid rgba(124,106,247,.25);animation:fadeUp .4s ease}
+.ext-banner-active{background:linear-gradient(135deg,rgba(52,211,153,.08),rgba(16,185,129,.04));border:1px solid rgba(52,211,153,.2)}
+.paste-import-section{padding:20px;margin-bottom:20px;animation:slideDown .3s ease}
+.paste-import-section textarea{width:100%;min-height:130px;padding:12px;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:12px;font-family:monospace;resize:vertical;outline:none;line-height:1.6;transition:border-color .2s}
+.paste-import-section textarea:focus{border-color:var(--accent)}
+
 @media(max-width:480px){.calc-grid,.subjects-grid{grid-template-columns:1fr}}
 input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none}
 input[type=number]{-moz-appearance:textfield}
@@ -1376,6 +1403,428 @@ function SyncBanner({ subjects, user, onDone, onCancel }) {
   );
 }
 
+
+// ═══════════════════════════════════════════════════════════
+//  DAYWISE PAGE COMPONENT
+// ═══════════════════════════════════════════════════════════
+
+// Parse daywise data pasted from CyberVidya detail page
+function parseDaywiseText(raw) {
+  const entries = [];
+  if (!raw || !raw.trim()) return entries;
+  const lines = raw.split(/[\r\n]+/).map(l=>l.trim()).filter(Boolean);
+  for (const line of lines) {
+    // Skip headers
+    if (/^(date|day|attendance|s\.no|status)/i.test(line)) continue;
+    // Tab separated: Date\tDay\tStatus
+    const parts = line.split(/\t/).map(p=>p.trim());
+    let dateStr='', statusStr='';
+    for (const p of parts) {
+      if (/\d{2}[\/\-]\d{2}[\/\-]\d{4}/.test(p)) dateStr = p;
+      if (/^(present|absent|holiday|p|a|h)$/i.test(p)) statusStr = p;
+    }
+    if (!dateStr) {
+      const m = line.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4})/);
+      if (m) dateStr = m[1];
+    }
+    if (!statusStr) {
+      if (/present/i.test(line)) statusStr = 'present';
+      else if (/absent/i.test(line)) statusStr = 'absent';
+      else if (/holiday|cancel/i.test(line)) statusStr = 'holiday';
+    }
+    if (dateStr && statusStr) {
+      entries.push({
+        date: dateStr,
+        status: /^(present|p)$/i.test(statusStr) ? 'P' : /^(absent|a)$/i.test(statusStr) ? 'A' : 'H'
+      });
+    }
+  }
+  return entries;
+}
+
+// Calendar view component
+function AttendanceCalendar({ entries }) {
+  if (!entries || entries.length === 0) return (
+    <div style={{textAlign:'center',padding:'32px',color:'var(--text3)'}}>
+      <div style={{fontSize:'40px',marginBottom:'12px',opacity:.5}}>📅</div>
+      <div>Koi daywise data nahi hai</div>
+    </div>
+  );
+
+  // Parse dates and group by month
+  const dateMap = {};
+  entries.forEach(e => {
+    const [dd, mm, yyyy] = e.date.includes('/') ? e.date.split('/') : e.date.split('-');
+    const key = `${yyyy}-${mm}`;
+    if (!dateMap[key]) dateMap[key] = {};
+    dateMap[key][parseInt(dd)] = e.status;
+  });
+
+  const months = Object.keys(dateMap).sort();
+  const monthNames = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const today = new Date();
+
+  const present = entries.filter(e=>e.status==='P').length;
+  const absent  = entries.filter(e=>e.status==='A').length;
+  const holiday = entries.filter(e=>e.status==='H').length;
+
+  return (
+    <div className="calendar-wrap">
+      {/* Stats */}
+      <div className="daywise-stats">
+        <div className="daywise-stat">
+          <div className="daywise-stat-val" style={{color:'var(--green)'}}>{present}</div>
+          <div className="daywise-stat-label">Present</div>
+        </div>
+        <div className="daywise-stat">
+          <div className="daywise-stat-val" style={{color:'var(--red)'}}>{absent}</div>
+          <div className="daywise-stat-label">Absent</div>
+        </div>
+        {holiday>0 && <div className="daywise-stat">
+          <div className="daywise-stat-val" style={{color:'var(--yellow)'}}>{holiday}</div>
+          <div className="daywise-stat-label">Holiday</div>
+        </div>}
+        <div className="daywise-stat">
+          <div className="daywise-stat-val" style={{color:'var(--accent2)'}}>{entries.length>0?((present/(present+absent)*100)||0).toFixed(0)+'%':'—'}</div>
+          <div className="daywise-stat-label">Rate</div>
+        </div>
+      </div>
+
+      {/* Month Calendars */}
+      {months.map(monthKey => {
+        const [yyyy, mm] = monthKey.split('-').map(Number);
+        const daysInMonth = new Date(yyyy, mm, 0).getDate();
+        const firstDay = new Date(yyyy, mm-1, 1).getDay(); // 0=Sun
+        const data = dateMap[monthKey];
+
+        return (
+          <div key={monthKey} className="cal-month">
+            <div className="cal-month-title">
+              <span>📅</span> {monthNames[mm]} {yyyy}
+            </div>
+            <div className="cal-grid">
+              {dayNames.map(d=><div key={d} className="cal-day-header">{d}</div>)}
+              {Array.from({length: firstDay}, (_,i) => (
+                <div key={'e'+i} className="cal-day empty"/>
+              ))}
+              {Array.from({length: daysInMonth}, (_,i) => {
+                const day = i+1;
+                const status = data[day];
+                const isToday = today.getDate()===day && today.getMonth()===mm-1 && today.getFullYear()===yyyy;
+                const cls = status==='P'?'present':status==='A'?'absent':status==='H'?'holiday':'empty';
+                const title = status==='P'?'Present':status==='A'?'Absent':status==='H'?'Holiday':'No data';
+                return (
+                  <div key={day} className={`cal-day ${cls} ${isToday?'today':''}`} title={`${day} ${monthNames[mm]} — ${title}`}>
+                    {day}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Main DaywisePage component
+function DaywisePage({ user }) {
+  const [records, setRecords]       = useState([]);
+  const [subjects, setSubjects]     = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [activeRecord, setActiveRecord]    = useState(null); // viewing calendar
+  const [pasteSubject, setPasteSubject]    = useState('');
+  const [pasteText, setPasteText]          = useState('');
+  const [saving, setSaving]                = useState(false);
+  const [extInstalled, setExtInstalled]    = useState(false);
+
+  const subCol  = firebaseReady && user ? db.collection('users').doc(user.uid).collection('subjects')  : null;
+  const dayCol  = firebaseReady && user ? db.collection('users').doc(user.uid).collection('daywise')   : null;
+
+  // Detect extension
+  useEffect(()=>{
+    const check = () => setExtInstalled(!!document.getElementById('bunkplanner-extension-installed'));
+    check(); const t=setTimeout(check,1500); return ()=>clearTimeout(t);
+  },[]);
+
+  // Load subjects
+  useEffect(()=>{
+    if (!subCol) { setLoading(false); return; }
+    const u = subCol.orderBy('createdAt','asc').onSnapshot(snap=>{
+      setSubjects(snap.docs.map(d=>({id:d.id,...d.data()})));
+      setLoading(false);
+    }, ()=>setLoading(false));
+    return ()=>u();
+  },[user && user.uid]);
+
+  // Load daywise records
+  useEffect(()=>{
+    if (!dayCol) return;
+    const u = dayCol.onSnapshot(snap=>{
+      setRecords(snap.docs.map(d=>({id:d.id,...d.data()})));
+    });
+    return ()=>u();
+  },[user && user.uid]);
+
+  async function handleSavePaste() {
+    if (!pasteSubject) { toast('Subject select karo!','error'); return; }
+    if (!pasteText.trim()) { toast('Pehle data paste karo!','error'); return; }
+    const entries = parseDaywiseText(pasteText);
+    if (entries.length === 0) { toast('Data samajh nahi aaya. Format check karo!','error'); return; }
+    setSaving(true);
+    try {
+      const sub = subjects.find(s=>s.id===pasteSubject);
+      const existing = records.find(r=>r.subjectId===pasteSubject);
+      if (existing) {
+        await dayCol.doc(existing.id).update({ entries, subjectName: sub.name, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        toast(`${sub.name} ka data update hua! ✅`,'success');
+      } else {
+        await dayCol.add({ subjectId: pasteSubject, subjectName: sub.name, entries,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+        toast(`${sub.name} ka daywise save ho gaya! 📅`,'success');
+      }
+      setShowPasteModal(false); setPasteText(''); setPasteSubject('');
+    } catch(e) { toast('Save failed: '+e.message,'error'); }
+    setSaving(false);
+  }
+
+  async function handleDeleteRecord(id) {
+    await dayCol.doc(id).delete();
+    toast('Daywise data remove kiya 🗑️','error');
+    if (activeRecord?.id===id) setActiveRecord(null);
+  }
+
+  // Save extension-synced daywise data
+  async function saveExtensionDaywiseData(subjectsWithDaywise) {
+    if (!dayCol) return;
+    const existing = await dayCol.get();
+    let saved = 0;
+    for (const s of subjectsWithDaywise) {
+      if (!s.daywise || s.daywise.length === 0) continue;
+      const matchSub = subjects.find(sub => sub.name.toLowerCase().includes(s.name.toLowerCase().slice(0,10)));
+      const subjectId = matchSub?.id || s.id || s.name;
+      const existDoc = existing.docs.find(d => d.data().subjectId === subjectId || d.data().subjectName === s.name);
+      if (existDoc) {
+        await dayCol.doc(existDoc.id).update({ entries: s.daywise, subjectName: s.name, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      } else {
+        await dayCol.add({ subjectId, subjectName: s.name, entries: s.daywise, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      }
+      saved++;
+    }
+    if (saved > 0) toast(`📅 ${saved} subjects ka daywise data save ho gaya!`,'success');
+  }
+
+  if (loading) return (
+    <div style={{textAlign:'center',padding:'60px 0',color:'var(--text3)'}}>
+      <div style={{fontSize:'36px',animation:'spin 1s linear infinite',marginBottom:'14px'}}>⏳</div>
+      <div>Loading...</div>
+    </div>
+  );
+
+  // If viewing a specific record's calendar
+  if (activeRecord) {
+    const sub = subjects.find(s=>s.id===activeRecord.subjectId) || {name:activeRecord.subjectName};
+    return (
+      <div>
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:'20px',flexWrap:'wrap'}}>
+          <button className="btn btn-ghost" style={{padding:'8px 14px',fontSize:'13px'}} onClick={()=>setActiveRecord(null)}>← Back</button>
+          <div>
+            <div style={{fontFamily:'Syne,sans-serif',fontSize:'18px',fontWeight:700}}>{activeRecord.subjectName}</div>
+            <div style={{fontSize:'12px',color:'var(--text2)'}}>Day-wise Attendance Calendar</div>
+          </div>
+        </div>
+        <div className="glass" style={{padding:'24px'}}>
+          <AttendanceCalendar entries={activeRecord.entries}/>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Extension Banner */}
+      <div className={`ext-banner ${extInstalled?'ext-banner-active':''}`}>
+        <div>
+          <div style={{fontFamily:'Syne,sans-serif',fontSize:'15px',fontWeight:700,marginBottom:'3px'}}>
+            {extInstalled ? '✅ Extension Active!' : '🧩 BunkPlanner Extension'}
+          </div>
+          <div style={{fontSize:'12px',color:'var(--text2)'}}>
+            {extInstalled
+              ? 'Extension se daywise data auto-fetch karo → CyberVidya tab pe jao → Extension icon click karo → "Summary + Daywise Fetch" karo'
+              : 'Extension install karo for auto daywise fetch, ya manually copy-paste karo below'}
+          </div>
+        </div>
+        {!extInstalled && (
+          <div style={{fontSize:'11px',color:'var(--text3)',whiteSpace:'nowrap'}}>
+            brave://extensions → Load Unpacked
+          </div>
+        )}
+      </div>
+
+      {/* Manual Paste Section */}
+      <div className="glass" style={{
+        padding:'18px 22px',marginBottom:'20px',
+        background:'linear-gradient(135deg,rgba(52,211,153,.06),rgba(124,106,247,.04))',
+        border:'1px solid rgba(52,211,153,.2)',
+        display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'12px'
+      }}>
+        <div>
+          <div style={{fontFamily:'Syne,sans-serif',fontSize:'15px',fontWeight:700,marginBottom:'3px'}}>
+            📋 Manual Import
+          </div>
+          <div style={{fontSize:'12px',color:'var(--text2)'}}>
+            CyberVidya pe subject click karo → date table copy karo → yahan paste karo
+          </div>
+        </div>
+        <button className="btn btn-primary" style={{whiteSpace:'nowrap'}} onClick={()=>setShowPasteModal(true)}>
+          + Add Daywise Data
+        </button>
+      </div>
+
+      {/* Records Grid */}
+      {records.length === 0 ? (
+        <div className="glass empty-state">
+          <div className="empty-icon">📅</div>
+          <div className="empty-title">Koi daywise data nahi!</div>
+          <div className="empty-sub">
+            Extension se auto-fetch karo ya manually CyberVidya se copy-paste karo.<br/>
+            <br/>
+            <strong>Manual Steps:</strong><br/>
+            1. kiet.cybervidya.net → Attendance → Subject pe click karo<br/>
+            2. Date table Ctrl+A → Ctrl+C karo<br/>
+            3. "+ Add Daywise Data" click karo → Paste karo
+          </div>
+          <button className="btn btn-primary" style={{display:'inline-flex'}} onClick={()=>setShowPasteModal(true)}>
+            + Add Daywise Data
+          </button>
+        </div>
+      ) : (
+        <>
+          <div style={{fontFamily:'Syne,sans-serif',fontSize:'18px',fontWeight:700,marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}>
+            📅 Daywise Records
+            <span style={{fontSize:'13px',fontWeight:500,color:'var(--text2)'}}>— {records.length} subjects</span>
+          </div>
+          <div className="daywise-grid">
+            {records.map((rec,i) => {
+              const entries = rec.entries || [];
+              const present = entries.filter(e=>e.status==='P').length;
+              const absent  = entries.filter(e=>e.status==='A').length;
+              const total   = present + absent;
+              const pct     = total > 0 ? ((present/total)*100).toFixed(1) : 0;
+              const color   = parseFloat(pct)>=75?'var(--green)':parseFloat(pct)>=65?'var(--yellow)':'var(--red)';
+              const status  = parseFloat(pct)>=75?'safe':parseFloat(pct)>=65?'risk':'danger';
+
+              return (
+                <div key={rec.id} className={`glass daywise-card`}
+                  style={{borderTop:`3px solid ${color.includes('green')?'var(--green)':color.includes('yellow')?'var(--yellow)':'var(--red)'}`}}
+                  onClick={()=>setActiveRecord(rec)}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'12px'}}>
+                    <div style={{fontFamily:'Syne,sans-serif',fontSize:'15px',fontWeight:700,flex:1,paddingRight:'8px'}}>{rec.subjectName}</div>
+                    <div style={{display:'flex',gap:'6px',flexShrink:0}}>
+                      <button onClick={e=>{e.stopPropagation();handleDeleteRecord(rec.id);}}
+                        style={{width:'26px',height:'26px',borderRadius:'7px',border:'1px solid var(--border)',background:'var(--surface)',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'12px',color:'var(--text2)'}}>
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{display:'flex',gap:'8px',marginBottom:'12px'}}>
+                    <div style={{flex:1,textAlign:'center',padding:'8px',background:'var(--surface)',borderRadius:'8px'}}>
+                      <div style={{fontFamily:'Syne,sans-serif',fontSize:'18px',fontWeight:800,color}}>
+                        {pct}%
+                      </div>
+                      <div style={{fontSize:'10px',color:'var(--text2)',marginTop:'2px'}}>RATE</div>
+                    </div>
+                    <div style={{flex:1,textAlign:'center',padding:'8px',background:'var(--surface)',borderRadius:'8px'}}>
+                      <div style={{fontFamily:'Syne,sans-serif',fontSize:'18px',fontWeight:800,color:'var(--green)'}}>{present}</div>
+                      <div style={{fontSize:'10px',color:'var(--text2)',marginTop:'2px'}}>PRESENT</div>
+                    </div>
+                    <div style={{flex:1,textAlign:'center',padding:'8px',background:'var(--surface)',borderRadius:'8px'}}>
+                      <div style={{fontFamily:'Syne,sans-serif',fontSize:'18px',fontWeight:800,color:'var(--red)'}}>{absent}</div>
+                      <div style={{fontSize:'10px',color:'var(--text2)',marginTop:'2px'}}>ABSENT</div>
+                    </div>
+                  </div>
+                  {/* Mini Calendar Preview */}
+                  <div style={{display:'flex',gap:'2px',flexWrap:'wrap',marginBottom:'10px'}}>
+                    {entries.slice(-30).map((e,j)=>(
+                      <div key={j} title={e.date} style={{
+                        width:'10px',height:'10px',borderRadius:'2px',
+                        background:e.status==='P'?'rgba(52,211,153,.6)':e.status==='A'?'rgba(248,113,113,.6)':'rgba(251,191,36,.4)'
+                      }}/>
+                    ))}
+                  </div>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                    <span className={`badge badge-${status}`}>{status==='safe'?'✅ Safe':status==='risk'?'⚠️ Risk':'🚨 Danger'}</span>
+                    <span style={{fontSize:'11px',color:'var(--text3)'}}>{entries.length} days recorded</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* PASTE MODAL */}
+      {showPasteModal && (
+        <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setShowPasteModal(false)}>
+          <div className="modal" style={{maxWidth:'500px',maxHeight:'90vh',overflowY:'auto'}}>
+            <div className="modal-title">📋 Daywise Data Paste Karo</div>
+
+            <div style={{padding:'14px',marginBottom:'16px',borderRadius:'10px',
+              background:'rgba(124,106,247,.08)',border:'1px solid rgba(124,106,247,.2)',
+              fontSize:'13px',lineHeight:'1.7',color:'var(--text2)'}}>
+              <div style={{fontWeight:700,color:'var(--accent2)',marginBottom:'6px'}}>📌 Steps:</div>
+              <div>1️⃣ <a href="https://kiet.cybervidya.net/attendance/my-attendance" target="_blank" style={{color:'var(--accent2)'}}>CyberVidya Attendance</a> kholo</div>
+              <div>2️⃣ Kisi subject pe click karo (daywise detail)</div>
+              <div>3️⃣ Date table → <strong style={{color:'var(--text)'}}>Ctrl+A → Ctrl+C</strong></div>
+              <div>4️⃣ Neeche paste karo</div>
+            </div>
+
+            <div className="input-wrap" style={{marginBottom:'14px'}}>
+              <label className="input-label">Subject Select Karo</label>
+              <select className="input" value={pasteSubject} onChange={e=>setPasteSubject(e.target.value)}
+                style={{cursor:'pointer'}}>
+                <option value="">-- Subject Choose Karo --</option>
+                {subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+
+            <div className="input-wrap" style={{marginBottom:'16px'}}>
+              <label className="input-label">CyberVidya Daywise Data Paste Karo 👇</label>
+              <textarea className="paste-import-section" style={{
+                width:'100%',minHeight:'150px',padding:'12px',
+                background:'var(--surface)',border:'1.5px solid var(--border)',
+                borderRadius:'var(--radius-sm)',color:'var(--text)',
+                fontFamily:'monospace',fontSize:'12px',resize:'vertical',
+                outline:'none',lineHeight:'1.6',transition:'border-color .2s'
+              }}
+              value={pasteText}
+              onChange={e=>setPasteText(e.target.value)}
+              placeholder={`Yahan paste karo — example format:\n\nDate\tDay\tAttendance Status\n01/01/2026\tThursday\tPresent\n02/01/2026\tFriday\tAbsent\n05/01/2026\tMonday\tPresent\n...`}
+              onFocus={e=>e.target.style.borderColor='var(--accent)'}
+              onBlur={e=>e.target.style.borderColor='var(--border)'}
+              />
+              {pasteText && (
+                <div style={{fontSize:'11px',color:'var(--text3)',marginTop:'4px'}}>
+                  Preview: {parseDaywiseText(pasteText).length} entries detected
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={()=>{setShowPasteModal(false);setPasteText('');setPasteSubject('');}}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleSavePaste} disabled={saving||!pasteSubject||!pasteText.trim()}>
+                {saving?'⏳ Saving...':'📅 Save Daywise Data'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ══ App ═══════════════════════════════════════════════════
 function App() {
   const [user,setUser]           = useState(undefined);
@@ -1403,33 +1852,59 @@ function App() {
   function processSyncPayload(detail) {
     console.log('[BunkPlanner] Processing sync payload. Type:', detail.type);
     let subjects = [];
-    if (detail.type === 'direct' && Array.isArray(detail.subjects)) {
+    // v6 extension format
+    if ((detail.type === 'scraped_v6' || detail.type === 'direct') && Array.isArray(detail.subjects)) {
       subjects = detail.subjects;
     } else if (detail.type === 'api' && detail.data) {
       subjects = parseCyberVidyaAPIData(detail.data);
     } else if (detail.type === 'scraped' && detail.data) {
       subjects = parseCyberVidyaData(detail.data);
+    } else if (Array.isArray(detail.subjects)) {
+      subjects = detail.subjects;
     }
     if (subjects.length > 0) {
-      setSyncBanner({ subjects });
+      const hasDaywise = subjects.some(s => s.daywise && s.daywise.length > 0);
+      setSyncBanner({ subjects, hasDaywise });
       setTab('subjects');
-      toast(`🎓 ${subjects.length} subjects fetched from CyberVidya!`, 'success');
+      toast(`🎓 ${subjects.length} subjects fetched! ${hasDaywise ? '📅 Daywise bhi!' : ''}`, 'success');
     } else {
       toast('CyberVidya se data parse nahi hua 😅', 'error');
     }
   }
 
-  // On mount: check localStorage for pending sync data (set by extension before React loaded)
+  // On mount: check BOTH localStorage AND chrome.storage for pending sync data
   useEffect(()=>{
-    const pending = localStorage.getItem('bp_pending_sync');
-    if (pending) {
-      localStorage.removeItem('bp_pending_sync');
+    function tryLoad(data) {
+      if (!data) return false;
       try {
-        const parsed = JSON.parse(pending);
-        console.log('[BunkPlanner] Found pending sync in localStorage:', parsed.type, parsed.subjects?.length);
-        // Small delay so UI is fully rendered before showing banner
-        setTimeout(() => processSyncPayload(parsed), 600);
-      } catch(e) { console.error('[BunkPlanner] localStorage parse error:', e); }
+        const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+        if (parsed && (parsed.subjects || parsed.data)) {
+          console.log('[BunkPlanner] Pending sync found:', parsed.type, parsed.subjects?.length);
+          setTimeout(() => processSyncPayload(parsed), 600);
+          return true;
+        }
+      } catch(e) { console.error('[BunkPlanner] parse error:', e); }
+      return false;
+    }
+
+    // Check localStorage first
+    const lsPending = localStorage.getItem('bp_pending_sync');
+    if (lsPending) {
+      localStorage.removeItem('bp_pending_sync');
+      if (tryLoad(lsPending)) return;
+    }
+
+    // Check chrome.storage (set by extension background.js)
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        chrome.runtime.sendMessage({ action: 'getPendingData' }, (resp) => {
+          if (chrome.runtime.lastError) return; // extension not installed
+          if (resp && resp.success && resp.data) {
+            chrome.runtime.sendMessage({ action: 'clearPendingData' });
+            tryLoad(resp.data);
+          }
+        });
+      } catch(e) { /* extension not installed, ignore */ }
     }
   // eslint-disable-next-line
   }, []);
@@ -1515,9 +1990,11 @@ function App() {
         <div className="tabs">
           <button className={`tab-btn ${tab==='subjects'?'active':''}`} onClick={()=>setTab('subjects')}>📚 My Subjects</button>
           <button className={`tab-btn ${tab==='calc'?'active':''}`} onClick={()=>setTab('calc')}>🧮 Calculator</button>
+          <button className={`tab-btn ${tab==='daywise'?'active':''}`} onClick={()=>setTab('daywise')}>📅 Day-wise</button>
         </div>
         {tab==='subjects' && <Subjects user={user}/>}
         {tab==='calc'     && <Calculator/>}
+        {tab==='daywise'  && <DaywisePage user={user}/>}
       </main>
       <footer className="footer">Built with <span>❤️</span> for KIET students — bunk planning is a life skill 😎</footer>
       <ToastContainer/>
