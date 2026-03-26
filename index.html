@@ -233,8 +233,11 @@ try {
   });
   auth = firebase.auth();
   db = firebase.firestore();
+  // SESSION persistence: auto-logout when tab/browser is closed
+  auth.setPersistence(firebase.auth.Auth.Persistence.SESSION)
+    .then(() => { console.log("Firebase ready! (Session persistence)"); })
+    .catch(e  => { console.warn("Persistence set failed:", e.message); });
   firebaseReady = true;
-  console.log("Firebase ready!");
 } catch(e) {
   console.error("Firebase init error:", e.message);
 }
@@ -1363,7 +1366,7 @@ function SyncBanner({ subjects, user, onDone, onCancel }) {
   /* Firebase save with dedup */
   async function handleImport() {
     if (!col)             { toast('Firebase not connected!', 'error'); return; }
-    if (selected.size===0){ toast('No subject selected!', 'error'); return; }
+    if (selected.size===0){ toast('Koi subject select nahi kiya!', 'error'); return; }
     setSaving(true);
     try {
       const toImport = subjects.filter((_,i) => selected.has(i));
@@ -1639,7 +1642,7 @@ function AutoFetchBanner({ extInstalled: extProp, onDataReceived }) {
   const stepLabels = [
     { n:'1', l:'Click',     active: phase !== 'idle' },
     { n:'2', l:'CyberVidya',     active: phase === 'opening' || phase === 'scraping' },
-    { n:'3', l:'Scrape',         active: phase === 'scraping' },
+    { n:'3', l:'Auto scrape',    active: phase === 'scraping' },
     { n:'4', l:'Import',    active: phase === 'done' },
   ];
 
@@ -1700,7 +1703,7 @@ function AutoFetchBanner({ extInstalled: extProp, onDataReceived }) {
       {phase === 'idle' && !extInstalled && (
         <div className="cv-no-ext">
           ⚠️ <strong>Extension not installed.</strong>{' '}
-          Install <strong>extension_v11.zip</strong> from brave://extensions, then reload the page.
+          Install <strong>extension_v11.zip</strong> from brave://extensions/ first — then reload the page.
         </div>
       )}
     </div>
@@ -1912,7 +1915,7 @@ function App() {
         <div className="hero">
           <div className="hero-badge">👋 Welcome, {displayName}!</div>
           <h1 className="hero-title">Bunk Smarter,<br/>Not Harder</h1>
-          <p className="hero-sub">Data syncs in real-time across all devices.<br/>Add on laptop, check on phone! ☁️</p>
+          <p className="hero-sub">Data syncs real-time across all devices.<br/>Add on laptop, view on phone! ☁️</p>
         </div>
         <AutoFetchBanner
           extInstalled={extInstalled}
@@ -1925,7 +1928,7 @@ function App() {
         {tab==='subjects' && <Subjects user={user}/>}
         {tab==='calc'     && <Calculator/>}
       </main>
-      <footer className="footer">Built with <span>❤️</span> for KIET students — smarter attendance tracking 😎</footer>
+      <footer className="footer">Built with <span>❤️</span> for KIET students — bunk planning is a life skill 😎</footer>
       <ToastContainer/>
     </div>
   );
